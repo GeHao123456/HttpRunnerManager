@@ -1,3 +1,4 @@
+import datetime
 import io
 import json
 import logging
@@ -5,9 +6,10 @@ import os
 from json import JSONDecodeError
 
 import yaml
+from django.db.models import Sum
 from djcelery.models import PeriodicTask
 
-from ApiManager.models import ModuleInfo, TestCaseInfo
+from ApiManager.models import ModuleInfo, TestCaseInfo, TestReports
 from ApiManager.utils.operation import add_project_data, add_module_data, add_case_data, add_config_data, \
     add_register_data
 from ApiManager.utils.task_opt import create_task
@@ -133,10 +135,8 @@ def load_modules(**kwargs):
     :return: str: module_info
     """
     belong_project = kwargs.get('name').get('project')
-    module_info = ModuleInfo.objects.filter(belong_project__project_name=belong_project).values_list(
-        'id',
-        'module_name').order_by(
-        '-create_time')
+    module_info = ModuleInfo.objects.filter(belong_project__project_name=belong_project) \
+        .values_list('id', 'module_name').order_by('-create_time')
     module_info = list(module_info)
     string = ''
     for value in module_info:
@@ -144,7 +144,7 @@ def load_modules(**kwargs):
     return string[:len(string) - 11]
 
 
-def load_cases(**kwargs):
+def load_cases(type=1, **kwargs):
     """
     加载指定项目模块下的用例
     :param kwargs: dict: 项目与模块信息
@@ -152,30 +152,17 @@ def load_cases(**kwargs):
     """
     belong_project = kwargs.get('name').get('project')
     module = kwargs.get('name').get('module')
-    if module == '请选择':
-        return ''
-    case_info = TestCaseInfo.objects.filter(belong_project=belong_project,
-                                            belong_module=module, type=1).values_list('id', 'name').order_by(
-        '-create_time')
+    if type == 1:
+        if module == '请选择':
+            return ''
+        case_info = TestCaseInfo.objects.filter(belong_project=belong_project, belong_module=module, type=type). \
+            values_list('id', 'name').order_by('-create_time')
+    elif type == 2:
+        case_info = TestCaseInfo.objects.filter(belong_project=belong_project, type=type). \
+            values_list('id', 'name').order_by('-create_time')
     case_info = list(case_info)
     string = ''
     for value in case_info:
-        string = string + str(value[0]) + '^=' + value[1] + 'replaceFlag'
-    return string[:len(string) - 11]
-
-
-def load_configs():
-    """
-    加载指定项目下的配置信息
-    :return:
-    """
-    config_info = TestCaseInfo.objects.filter(type=2).values_list(
-        'id',
-        'name').order_by(
-        '-create_time')
-    config_info = list(config_info)
-    string = ''
-    for value in config_info:
         string = string + str(value[0]) + '^=' + value[1] + 'replaceFlag'
     return string[:len(string) - 11]
 
@@ -230,7 +217,13 @@ def case_info_logic(type=True, **kwargs):
     '''
     if 'request' not in test.keys():
         type = test.pop('type')
-        return load_modules(**test) if type == 'module' else load_cases(**test)
+        if type == 'module':
+            return load_modules(**test)
+        elif type == 'case':
+            return load_cases(**test)
+        else:
+            return load_cases(type=2, **test)
+
     else:
         logging.info('用例原始信息: {kwargs}'.format(kwargs=kwargs))
         if test.get('name').get('case_name') is '':
@@ -240,13 +233,13 @@ def case_info_logic(type=True, **kwargs):
         if test.get('request').get('url') is '':
             return '接口地址不能为空'
         if test.get('name').get('module') == '请选择':
-            return '请选择模块'
+            return '请选择或者添加模块'
         if test.get('name').get('project') == '请选择':
             return '请选择项目'
         if test.get('name').get('project') == '':
             return '请先添加项目'
         if test.get('name').get('module') == '':
-            return '请先添加模块'
+            return '请添加模块'
 
         name = test.pop('name')
         test.setdefault('name', name.pop('case_name'))
@@ -332,11 +325,11 @@ def config_info_logic(type=True, **kwargs):
         if config.get('name').get('project') == '请选择':
             return '请选择项目'
         if config.get('name').get('module') == '请选择':
-            return '请选择模块'
+            return '请选择或者添加模块'
         if config.get('name').get('project') == '':
             return '请先添加项目'
         if config.get('name').get('module') == '':
-            return '请先添加模块'
+            return '请添加模块'
 
         name = config.pop('name')
         config.setdefault('name', name.pop('config_name'))
@@ -422,8 +415,10 @@ def task_logic(**kwargs):
     if PeriodicTask.objects.filter(name__exact=kwargs.get('name')).count() > 0:
         return '任务名称重复，请重新命名'
     desc = " ".join(str(i) for i in crontab_time)
-    name = kwargs.pop('name')
+    name = kwargs.get('name')
+
     if 'module' in kwargs.keys():
+        kwargs.pop('project')
         return create_task(name, 'ApiManager.tasks.module_hrun', kwargs, crontab, desc)
     else:
         return create_task(name, 'ApiManager.tasks.project_hrun', kwargs, crontab, desc)
@@ -431,17 +426,20 @@ def task_logic(**kwargs):
 
 def set_filter_session(request):
     """
-    查询session
+    update session
     :param request:
     :return:
     """
-    request.session['user'] = '' if 'user' not in request.POST.keys() else request.POST.get('user')
-    request.session['name'] = '' if 'name' not in request.POST.keys() else request.POST.get('name')
-    request.session['belong_project'] = '' if 'belong_project' not in request.POST.keys() else request.POST.get(
-        'belong_project')
-    request.session['belong_module'] = '' if 'belong_module' not in request.POST.keys() else request.POST.get(
-        'belong_module')
-    request.session['report_name'] = '' if 'report_name' not in request.POST.keys() else request.POST.get('report_name')
+    if 'user' in request.POST.keys():
+        request.session['user'] = request.POST.get('user')
+    if 'name' in request.POST.keys():
+        request.session['name'] = request.POST.get('name')
+    if 'belong_project' in request.POST.keys():
+        request.session['belong_project'] = request.POST.get('belong_project')
+    if 'belong_module' in request.POST.keys():
+        request.session['belong_module'] = request.POST.get('belong_module')
+    if 'report_name' in request.POST.keys():
+        request.session['report_name'] = request.POST.get('report_name')
 
     filter_query = {
         'user': request.session['user'],
@@ -452,6 +450,26 @@ def set_filter_session(request):
     }
 
     return filter_query
+
+
+def init_filter_session(request, type=True):
+    """
+    init session
+    :param request:
+    :return:
+    """
+    if type:
+        request.session['user'] = ''
+        request.session['name'] = ''
+        request.session['belong_project'] = ''
+        request.session['belong_module'] = ''
+        request.session['report_name'] = ''
+    else:
+        del request.session['user']
+        del request.session['name']
+        del request.session['belong_project']
+        del request.session['belong_module']
+        del request.session['report_name']
 
 
 def get_ajax_msg(msg, success):
@@ -523,3 +541,33 @@ def upload_file_logic(files, project, module, account):
                     test_case.get('test')['validate'] = new_validate
 
                 add_case_data(type=True, **test_case)
+
+
+def get_total_values():
+    total = {
+        'pass': [],
+        'fail': [],
+        'percent': []
+    }
+    today = datetime.date.today()
+    for i in range(-11, 1):
+        begin = today + datetime.timedelta(days=i)
+        end = begin + datetime.timedelta(days=1)
+
+        total_run = TestReports.objects.filter(create_time__range=(begin, end)).aggregate(testRun=Sum('testsRun'))[
+            'testRun']
+        total_success = TestReports.objects.filter(create_time__range=(begin, end)).aggregate(success=Sum('successes'))[
+            'success']
+
+        if not total_run:
+            total_run = 0
+        if not total_success:
+            total_success = 0
+
+        total_percent = round(total_success / total_run * 100, 2) if total_run != 0 else 0.00
+        total['pass'].append(total_success)
+        total['fail'].append(total_run - total_success)
+        total['percent'].append(total_percent)
+
+    return total
+

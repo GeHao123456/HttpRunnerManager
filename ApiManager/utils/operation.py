@@ -135,12 +135,17 @@ def add_case_data(type, **kwargs):
     module = case_info.get('module')
     project = case_info.get('project')
     belong_module = ModuleInfo.objects.get_module_name(module, type=False)
+    config_id = case_info.get('config', '')
+    if config_id != '请选择' and config_id != '':
+        config_name = TestCaseInfo.objects.get_case_by_id(config_id, type=False)
+        case_info.get('include').insert(0, {'config': [config_id, config_name]})
+
     try:
         if type:
 
             if case_opt.get_case_name(name, module, project) < 1:
                 case_opt.insert_case(belong_module, **kwargs)
-                logger.info('{name}用例添加成功'.format(name=name))
+                logger.info('{name}用例添加成功: {kwargs}'.format(name=name, kwargs=kwargs))
             else:
                 return '用例或配置已存在，请重新编辑'
         else:
@@ -149,7 +154,7 @@ def add_case_data(type, **kwargs):
                     and case_opt.get_case_name(name, module, project) > 0:
                 return '用例或配置已在该模块中存在，请重新命名'
             case_opt.update_case(belong_module, **kwargs)
-            logger.info('{name}用例更新成功'.format(name=name))
+            logger.info('{name}用例更新成功: {kwargs}'.format(name=name, kwargs=kwargs))
 
     except DataError:
         logger.error('用例信息：{kwargs}过长！！'.format(kwargs=kwargs))
@@ -178,7 +183,7 @@ def add_config_data(type, **kwargs):
         if type:
             if case_opt.get_case_name(name, module, project) < 1:
                 case_opt.insert_config(belong_module, **kwargs)
-                logger.info('{name}配置添加成功'.format(name=name))
+                logger.info('{name}配置添加成功: {kwargs}'.format(name=name, kwargs=kwargs))
             else:
                 return '用例或配置已存在，请重新编辑'
         else:
@@ -187,7 +192,7 @@ def add_config_data(type, **kwargs):
                     and case_opt.get_case_name(name, module, project) > 0:
                 return '用例或配置已在该模块中存在，请重新命名'
             case_opt.update_config(belong_module, **kwargs)
-            logger.info('{name}配置更新成功'.format(name=name))
+            logger.info('{name}配置更新成功: {kwargs}'.format(name=name, kwargs=kwargs))
     except DataError:
         logger.error('{name}配置信息过长：{kwargs}'.format(name=name, kwargs=kwargs))
         return '字段长度超长，请重新编辑'
@@ -345,7 +350,7 @@ def add_test_reports(start_at, report_name=None, **kwargs):
     :param kwargs: dict: 报告结果值
     :return:
     """
-    kwargs.get('time').pop('start_at')
+    kwargs.get('time')['start_at'] = start_at
     report_name = report_name if report_name else start_at
     kwargs['html_report_name'] = report_name
     test_reports = {

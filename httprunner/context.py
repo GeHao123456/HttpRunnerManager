@@ -202,7 +202,7 @@ class Context(object):
                 check_value = resp_obj.extract_field(check_item)
             except exception.ParseResponseError:
                 msg = "failed to extract check item from response!\n"
-                msg += "response: {}".format(resp_obj.resp_text)
+                msg += "response content: {}".format(resp_obj.content)
                 raise exception.ParseResponseError(msg)
 
         validator["check_value"] = check_value
@@ -217,6 +217,7 @@ class Context(object):
     def do_validation(self, validator_dict):
         """ validate with functions
         """
+        # TODO: move comparator uniform to init_task_suite
         comparator = utils.get_uniform_comparator(validator_dict["comparator"])
         validate_func = self.testcase_parser.get_bind_function(comparator)
 
